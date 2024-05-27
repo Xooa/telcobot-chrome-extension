@@ -1,28 +1,35 @@
-
-document.getElementById('save-button').addEventListener('click', function (e) {
+document.getElementById("save-button").addEventListener("click", function (e) {
   e.preventDefault();
-  const chatbotUrl = document.getElementById('chatbot-url').value;
-  const errorTip = document.getElementById('error-tip');
 
-  if (chatbotUrl.trim() === "") {
-      errorTip.textContent = "Dify ChatBot URL cannot be empty.";
+  const domain = document.getElementById("domain").value;
+  const slug = document.getElementById("slug").value;
+  const errorTip = document.getElementById("error-tip");
+
+  if (domain.trim() === "" || slug.trim() === "") {
+    errorTip.textContent = "Domain and Slug cannot be empty.";
   } else {
     errorTip.textContent = "";
-
-    chrome.storage.sync.set({
-      'chatbotUrl': chatbotUrl,
-    }, function () {
-      alert('Save Success!');
-    });
+    chrome.storage.sync.set(
+      {
+        domain: domain,
+        slug: slug,
+      },
+      function () {
+        alert("Save Success!");
+      }
+    );
   }
 });
 
 // Load parameters from chrome.storage when the page loads
-chrome.storage.sync.get(['chatbotUrl'], function (result) {
-  const chatbotUrlInput = document.getElementById('chatbot-url');
+chrome.storage.sync.get(["domain", "slug"], function (result) {
+  const domainInput = document.getElementById("domain");
+  const slugInput = document.getElementById("slug");
 
-  if (result.chatbotUrl) {
-    chatbotUrlInput.value = result.chatbotUrl;
+  if (result.domain) {
+    domainInput.value = result.domain;
   }
-
+  if (result.slug) {
+    slugInput.value = result.slug;
+  }
 });

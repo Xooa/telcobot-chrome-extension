@@ -1,16 +1,83 @@
 const storage = chrome.storage.sync;
-chrome.storage.sync.get(['chatbotUrl'], function(result) {
-  window.difyChatbotConfig = { 
-    chatbotUrl: result.chatbotUrl,
+chrome.storage.sync.get(["domain", "slug"], function (result) {
+  window.telcobotChatbotConfig = {
+    chatbotUrl: `${result.domain}/frame/${result.slug}`,
+    domain: result.domain,
+    slug: result.slug,
   };
 });
+const KNOWN_HTML_CLASSES_TO_FILTER = [
+  "header",
+  "footer",
+  "bellow-article",
+  "taboola",
+  "ad-",
+  "HubPeek",
+  "img",
+  "Player",
+  "advertisement",
+];
 
 document.body.onload = embedChatbot;
 
+const popupCenter = (url, title) => {
+  const dualScreenLeft = window.screenLeft ?? window.screenX;
+  const dualScreenTop = window.screenTop ?? window.screenY;
+  const width =
+    window.innerWidth ?? document.documentElement.clientWidth ?? screen.width;
+
+  const height =
+    window.innerHeight ??
+    document.documentElement.clientHeight ??
+    screen.height;
+
+  const systemZoom = width / window.screen.availWidth;
+
+  const left = (width - 500) / 2 / systemZoom + dualScreenLeft;
+  const top = (height - 550) / 2 / systemZoom + dualScreenTop;
+
+  const newWindow = window.open(
+    url,
+    title,
+    `width=${500 / systemZoom},height=${
+      550 / systemZoom
+    },top=${top},left=${left}`
+  );
+
+  if (newWindow) {
+    newWindow.focus();
+  } else {
+    // popup was blocked
+    alert(
+      "Popup was blocked, Please allow website to open popups to use this feature."
+    );
+  }
+};
+
+function handleLoginLogout(event, port, props) {
+  let callbackURL = `${props.domain}/frame/${props.slug}`;
+  if (event.type == "logout") {
+    let url = `${props.domain}/api/auth/signout?callbackUrl=${callbackURL}`;
+    let windowName = "Thales Logout"; // Name of the new window
+
+    popupCenter(url, windowName);
+  } else {
+    let url = `${props.domain}/api/auth/signin/${event.provider}?callbackUrl=${callbackURL}`;
+    let windowName = "Thales Login"; // Name of the new window
+    popupCenter(url, windowName);
+
+    // port.postMessage(JSON.stringify({ status: "success" }));
+  }
+}
+
 async function embedChatbot() {
-  const difyChatbotConfig = window.difyChatbotConfig;
-  if (!difyChatbotConfig) {
-    console.warn('Dify Chatbot Url is empty or is not provided');
+  const telcobotChatbotConfig = window.telcobotChatbotConfig;
+  if (
+    !telcobotChatbotConfig ||
+    !telcobotChatbotConfig.slug ||
+    !telcobotChatbotConfig.domain
+  ) {
+    console.warn("Chatbot domain and slug is empty or is not provided");
     return;
   }
   const openIcon = `<svg
@@ -47,13 +114,95 @@ async function embedChatbot() {
 
   // create iframe
   function createIframe() {
-    const iframe = document.createElement('iframe');
-    iframe.allow = "fullscreen;microphone"
-    iframe.title = "dify chatbot bubble window"
-    iframe.id = 'dify-chatbot-bubble-window'
-    iframe.src = difyChatbotConfig.chatbotUrl
-    iframe.style.cssText = 'border: none; position: fixed; flex-direction: column; justify-content: space-between; box-shadow: rgba(150, 150, 150, 0.2) 0px 10px 30px 0px, rgba(150, 150, 150, 0.2) 0px 0px 0px 1px; bottom: 6.7rem; right: 1rem; width: 30rem; height: 48rem; border-radius: 0.75rem; display: flex; z-index: 2147483647; overflow: hidden; left: unset; background-color: #F3F4F6;'
+    const iframe = document.createElement("iframe");
+    iframe.allow = "fullscreen;microphone";
+    iframe.title = "telcobot chatbot bubble window";
+    iframe.crossorigin = "anonymous";
+    iframe.id = "telcobot-chatbot-bubble-window";
+    iframe.src = telcobotChatbotConfig.chatbotUrl;
+    iframe.style.cssText =
+      "border: none; position: fixed; flex-direction: column; justify-content: space-between; box-shadow: rgba(150, 150, 150, 0.2) 0px 10px 30px 0px, rgba(150, 150, 150, 0.2) 0px 0px 0px 1px; bottom: 6.7rem; right: 1rem; width: 30rem; height: 48rem; border-radius: 0.75rem; display: flex; z-index: 2147483647; overflow: hidden; left: unset; background-color: #F3F4F6;";
     document.body.appendChild(iframe);
+  }
+
+  // Add message listener logic
+  window.removeEventListener("message", onMessage);
+  window.addEventListener("message", onMessage);
+
+  let portRef;
+
+  function onMessage(e) {
+    console.info("e?.data?.type", e?.data?.type);
+    if (e?.data?.type == "loginSuccess" || e?.data?.type == "logoutSuccess") {
+      const targetIframe = document.getElementById(
+        "telcobot-chatbot-bubble-window"
+      );
+      if (targetIframe) {
+        // targetIframe.reload();
+        // delete iframe
+        targetIframe.remove();
+        createIframe();
+      }
+    }
+    if (e?.ports?.[0]) {
+      portRef = e.ports[0];
+      try {
+        let event = JSON.parse(e.data);
+        let context = "";
+        if (event.type == "login" || event.type == "logout") {
+          console.info("Event type", event.type);
+          handleLoginLogout(event, portRef, telcobotChatbotConfig);
+          return;
+        } else if (event.code) {
+          try {
+            let evaluated = Function(event.code)();
+            context = evaluated;
+          } catch (e) {
+            console.error("error in evaluating code", e);
+            context = document.body.innerHTML;
+          }
+        } else {
+          context = document.body.innerHTML;
+        }
+        try {
+          let el = document.createElement("div");
+          el.innerHTML = context;
+          try {
+            el.querySelector(".thales-frame").remove();
+          } catch (err) {}
+          let adElements = KNOWN_HTML_CLASSES_TO_FILTER.map((keyword) => {
+            return el.querySelectorAll(`[id*=${keyword}]`);
+          }).filter((el) => el.length > 0);
+          console.info("adElements ....", adElements);
+          adElements.forEach((els) => {
+            els.forEach((el) => el?.remove());
+          });
+          adElements = KNOWN_HTML_CLASSES_TO_FILTER.map((keyword) => {
+            return el.querySelectorAll(`.${keyword}`);
+          }).filter((el) => el.length > 0);
+          console.info("adElements ....", adElements);
+          adElements.forEach((els) => {
+            els.forEach((el) => el?.remove());
+          });
+          adElements = KNOWN_HTML_CLASSES_TO_FILTER.map((keyword) => {
+            return el.querySelectorAll(`[class*=${keyword}]`);
+          }).filter((el) => el.length > 0);
+          console.info("adElements ....", adElements);
+          adElements.forEach((els) => {
+            els.forEach((el) => el?.remove());
+          });
+          // el.innerHTML = sanitizeHtml(el.innerHTML);
+          context = el.innerText;
+        } catch (err) {
+          console.error(err);
+        }
+        context = context?.replace(/(\r\n|\n|\r)/gm, " ") || context;
+        console.info("context", context);
+        e.ports[0].postMessage(JSON.stringify({ context: context }));
+      } catch (err) {
+        console.info("err", err);
+      }
+    }
   }
 
   /**
@@ -131,23 +280,26 @@ async function embedChatbot() {
     }
   }
 
-  const targetButton = document.getElementById("dify-chatbot-bubble-button");
+  const targetButton = document.getElementById("telcobot-chatbot-bubble-button");
 
   if (!targetButton) {
     // create button
     const containerDiv = document.createElement("div");
-    containerDiv.id = 'dify-chatbot-bubble-button';
+    containerDiv.id = "telcobot-chatbot-bubble-button";
     containerDiv.style.cssText = `position: fixed; bottom: 3rem; right: 1rem; width: 50px; height: 50px; border-radius: 25px; background-color: #155EEF; box-shadow: rgba(0, 0, 0, 0.2) 0px 4px 8px 0px; cursor: move; z-index: 2147483647; transition: all 0.2s ease-in-out 0s; left: unset; transform: scale(1); :hover {transform: scale(1.1);}`;
-    const displayDiv = document.createElement('div');
-    displayDiv.style.cssText = "display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; z-index: 2147483647;";
+    const displayDiv = document.createElement("div");
+    displayDiv.style.cssText =
+      "display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; z-index: 2147483647;";
     displayDiv.innerHTML = openIcon;
     containerDiv.appendChild(displayDiv);
     document.body.appendChild(containerDiv);
     handleElementDrag(containerDiv);
 
     // add click event to control iframe display
-    containerDiv.addEventListener('click', function () {
-      const targetIframe = document.getElementById('dify-chatbot-bubble-window');
+    containerDiv.addEventListener("click", function () {
+      const targetIframe = document.getElementById(
+        "telcobot-chatbot-bubble-window"
+      );
       if (!targetIframe) {
         createIframe();
         displayDiv.innerHTML = closeIcon;
